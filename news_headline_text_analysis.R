@@ -1,0 +1,223 @@
+# author - Anupama Rajaram
+# Date - November 24, 2016
+# Description - News headline text analysis. This program does the following tasks:
+#               a) cleans the texts, 
+#               b) sorts and aggregates by publisher names
+#               c) creates word clouds and word associations
+
+# Dataset - uci-news-aggregator.csv
+# This file was obtained from Kaggle, an aggregation of news headlines 
+# published in different media and news sites.
+
+
+# =================================================================== #
+# Setting up workspace and required libraries.
+# =================================================================== #
+# call source file which will load all standard packages. (included in this project repo)
+source("workspace_prep.R")
+
+# load library packages needed for text analysis.
+library(wordcloud)
+library(qdap)
+library(tm)
+library(stringr)
+library(SnowballC)   
+library(Tmisc)
+
+
+# Read the source file containing text for analysis.
+text_dict_source <- data.frame(read.csv("uci-news-aggregator.csv"))
+text_sourcedf <- subset(text_dict_source, select = c("ID", "TITLE", "PUBLISHER"))
+rm(text_dict_source)
+
+
+
+# =================================================================== #
+# Defining all custom functions at the beginning.
+# =================================================================== #
+# function to aggregate text specific to a single publisher/ media house.
+create_text<- function( tempheadline )
+{
+  print(nrow(tempheadline))
+  # creating empty array
+  textarrdf = c(" ")
+  
+  for(i in 1:nrow(tempheadline))
+  {
+    tweetdf = tempheadline[i, "TITLE"]
+    textarrdf = paste(textarrdf, tweetdf , sep = " ")
+  }
+  
+  return(textarrdf)
+} 
+
+
+# =============================================
+# clean up the headlines
+# =============================================
+# remove special characters and emojis from tweets
+text_sourcedf$TITLE <- sapply(text_sourcedf$TITLE,function(row) 
+  iconv(row, "latin1", "ASCII", sub=""))
+
+
+
+# =============================================
+# aggregate content from the top 20 Publisher
+# =============================================
+# convert publisher names to lower and then sort in decreasing order of frequency.
+text_sourcedf$publ = tolower(text_sourcedf$PUBLISHER)
+x = data.frame(table(text_sourcedf$publ), stringsAsFactors = FALSE)
+x = x[order(x$Freq, decreasing=TRUE), ]
+colnames(x) = c("PublisherName", "Freq")
+
+
+# select the top 20 frequency publisher names
+# to increase or decrease this count, simply change the value of pubrct
+pubrct = 20
+publ = x[1:(pubrct),]
+rm(x)
+publ = unfactor(publ)
+
+
+# adding a placeholder for the headline texts
+publ$Text = "textarrdf"
+
+
+# loop through the Top 20 publisher names to aggregate the headline texts
+for(pub_num in 1:nrow(publ))
+{
+  # store the publisher's name in variable = "pbname"
+  pbname = publ[pub_num,"PublisherName"]
+  
+  # print the iteration number and publisher name, 
+  # just to know the program is working
+  print(paste("Iteration num =", pub_num, "| Publisher Name =", pbname ))
+  
+  # subset the headline text dataframe to pick up only the headline titles
+  # from the publisher name matching our current selection.
+  tempheadline = subset(text_sourcedf, text_sourcedf$publ == pbname)
+  
+  # collect all the headlines by this publisher into a single array
+  publ$Text[pub_num] = create_text(tempheadline)
+}
+
+
+#pbname = publ[pub_num,"PublisherName"]
+# write.csv(publ, "publisher_headlines.csv", row.names = FALSE)
+
+
+
+
+# ================================================================
+# create word corpus and perform cleaning and pre-processing
+# ================================================================
+wordCorpus <- Corpus(VectorSource(publ$Text))
+summary(wordCorpus)
+
+# processing and clean the text
+wordCorpus <- tm_map(wordCorpus, removePunctuation)
+wordCorpus <- tm_map(wordCorpus, removeNumbers)
+wordCorpus <- tm_map(wordCorpus, content_transformer(tolower))
+wordCorpus <- tm_map(wordCorpus, removeWords, stopwords("english"))
+wordCorpus <- tm_map(wordCorpus, stripWhitespace)
+wordCorpus <- tm_map(wordCorpus, stemDocument) 
+
+
+
+# ================================================================
+# create word clouds 
+# ================================================================  
+# create wordcloud for Publisher = "Reuters", index = 1
+wordCorpus1 <- tm_map(wordCorpus[1], stemDocument)
+# code to create a word cloud:
+wordcloud(wordCorpus1, scale=c(5,0.5), max.words=100, random.order=FALSE, 
+          rot.per=0.35, use.r.layout=FALSE, colors = brewer.pal(16, "Dark2"))
+
+# create wordcloud for Publisher = "thecelebritycafe.com", index = 11
+wordCorpus11 <- tm_map(wordCorpus[11], stemDocument)
+# code to create a word cloud:
+wordcloud(wordCorpus11, scale=c(5,0.5), max.words=100, random.order=FALSE, 
+          rot.per=0.35, use.r.layout=FALSE, colors = brewer.pal(16, "Dark2"))
+
+# create wordcloud for Publisher = "CBS Local", index = 20
+wordCorpus20 <- tm_map(wordCorpus[20], stemDocument)
+# code to create a word cloud:
+wordcloud(wordCorpus20, scale=c(5,0.5), max.words=400, random.order=FALSE, 
+          rot.per=0.35, use.r.layout=FALSE, colors = brewer.pal(16, "Dark2"))
+
+
+
+# ================================================================
+# Word frequency and word associations 
+# ================================================================  
+# Telling R that we have completed preprocessing, and to treat word-bag as text documents
+docsdf <- tm_map(wordCorpus, PlainTextDocument)  
+dtm <- DocumentTermMatrix(docsdf) 
+
+# view details about DTM:
+dtm
+dim(dtm)
+
+# create transpose of the DTM:
+tdm <- TermDocumentMatrix(docsdf)   
+tdm   
+
+# Organize terms by their frequency:
+freq <- colSums(as.matrix(dtm))   
+length(freq)  
+ord <- order(freq)
+
+#  Start by removing sparse terms:   
+dtms <- removeSparseTerms(dtm, 0.1) # This makes a matrix that is 10% empty space, maximum.   
+inspect(dtms) 
+
+# List most and least frequently occurring words.
+freq[head(ord)]  # least freq words
+freq["tail"(ord)] # most freq words
+
+
+# identify all terms that appear frequently (500+ times).
+findFreqTerms(dtm, lowfreq=500)
+
+findAssocs(dtm, c("global" , "market"), corlimit=0.99)
+findAssocs(dtm, c("kim" , "kardashian"), corlimit=0.9)
+findAssocs(dtm, "bruce", corlimit=0.90) # specifying a correlation limit of 0.90   
+findAssocs(dtm, "ukrain", corlimit=0.95)
+
+# plot word association
+docsdf <- tm_map(wordCorpus[1:3], PlainTextDocument)  
+dtm <- DocumentTermMatrix(docsdf) 
+xfrqdf = findFreqTerms(dtm, lowfreq=200)
+plot(dtm, term = xfrqdf, corThreshold = 0.12, 
+     weighting = F, attrs=list(node=list(width=20, 
+                                         fontsize=24, fontcolor="blue", color="red")))
+
+
+# ================================================================
+# Word Clusterings and dendograms
+# ================================================================  
+# Clustering by Term Similarity
+# remove infrequent words.
+dtmss <- removeSparseTerms(dtm, 0.01) # This makes a matrix that is only 1% empty space, maximum.   
+inspect(dtmss)   
+
+library(cluster)   
+d <- dist(t(dtmss), method="euclidian")   
+fit <- hclust(d=d, method="ward")   
+fit  
+plot(fit, hang = -1)   
+
+# making the dendogram easier to read
+plot.new()
+plot(fit, hang=-1)
+groups <- cutree(fit, k=5)   # "k=" defines the number of clusters you are using   
+rect.hclust(fit, k=5, border="red") # draw dendogram with red borders around the 5 clusters 
+
+# word clusters
+library(fpc)   
+d <- dist(t(dtmss), method="euclidian")   
+kfit <- kmeans(d, 2)   
+clusplot(as.matrix(d), kfit$cluster, color=T, shade=T, labels=2, lines=0)   
+
+
+
